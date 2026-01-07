@@ -8,7 +8,7 @@ import re
 import sys
 
 # --- КОНФИГУРАЦИЯ API ---
-API_KEY = "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"
+API_KEY = ""
 BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODEL = "kwaipilot/kat-coder-pro:free"
 
