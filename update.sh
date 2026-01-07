@@ -31,6 +31,8 @@ python3 -m pip install --user \
     pyautogui \
     requests
 
+pip install pyautogui
+
 echo "--- 5. Проверка установки ---"
 python3 -c "import mss; import docx; import pyautogui; import requests; print('✅ Все библиотеки успешно импортированы!')"
 
