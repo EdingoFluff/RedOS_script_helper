@@ -6,25 +6,64 @@ import subprocess
 import webbrowser
 import re
 import sys
+import os
+from datetime import datetime
+from mss import mss
+from docx import Document
+from docx.shared import Inches
 
 # --- КОНФИГУРАЦИЯ API ---
-API_KEY = ""
+API_KEY = "ВАШ_API_KEY" # Не забудьте вставить ваш ключ
 BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
 MODEL = "kwaipilot/kat-coder-pro:free"
 
-# Улучшенный промпт с четкими правилами и примерами
+# --- ЛОГИКА ОТЧЕТОВ (бывший screen.py) ---
+def append_screenshot_to_docx(docx_name="report.docx"):
+    """Делает скриншот и сохраняет его в Word-документ."""
+    temp_img = "temp_shot.png"
+    try:
+        # 1. Делаем скриншот первого монитора
+        with mss() as sct:
+            sct.shot(mon=1, output=temp_img)
+
+        # 2. Проверяем наличие файла: открываем существующий или создаем новый
+        if os.path.exists(docx_name):
+            doc = Document(docx_name)
+        else:
+            doc = Document()
+            doc.add_heading('Журнал скриншотов', 0)
+
+        # 3. Добавляем временную метку
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        doc.add_paragraph(f"Снимок сделан: {timestamp}")
+
+        # 4. Вставляем изображение
+        doc.add_picture(temp_img, width=Inches(6.0))
+
+        # 5. Сохраняем документ
+        doc.save(docx_name)
+        
+        # Удаляем временный файл картинки
+        if os.path.exists(temp_img):
+            os.remove(temp_img)
+        print(f"[+] Скриншот успешно добавлен в {docx_name}")
+    except Exception as e:
+        print(f"[-] Ошибка при создании скриншота: {e}")
+
+# --- ОБНОВЛЕННЫЙ ПРОМПТ ---
 SYSTEM_PROMPT = """
-Ты — модуль управления Red OS. Возвращай ТОЛЬКО валидный JSON-список команд БЕЗ текста, markdown или [].
+Ты — модуль управления Red OS. Возвращай ТОЛЬКО валидный JSON-список команд БЕЗ текста и markdown.
 
 Формат: [{"action": "hotkey", "params": ["ctrl","alt","t"]}, ...]
 
 **Действия:**
-- "hotkey": ["ctrl","alt","t"] или ["enter"]
-- "type": ["текст для ввода"] (один элемент!)
-- "wait": [число секунд]
-- "run_shell": ["команда без терминала"]
-- "open_url": ["https://example.com"]
-- "mouse_click": [x, y]
+- "hotkey": ["key1", "key2"] (нажать клавиши)
+- "type": ["текст"] (ввод текста)
+- "wait": [секунды] (пауза)
+- "run_shell": ["команда"] (выполнить в фоне)
+- "open_url": ["ссылка"] (открыть браузер)
+- "mouse_click": [x, y] (клик мышью)
+- "screenshot": [] (сделать скриншот экрана и сохранить в отчет docx)
 
 **Правила Red OS:**
 - Терминал: ctrl+alt+t → type → enter
@@ -32,7 +71,8 @@ SYSTEM_PROMPT = """
 - Root: su - → enter → type "1" → enter
 - Рабочий стол: /home/sergeykos/Desktop
 - Минимум 1 команда, максимум 10
-- Каждый пункт (1., 2.) — отдельный JSON-список
+- Воспринимай пункты списка (1. 2.) как отдельные инструкции
+- После каждой интрукции запускай логику "screenshot"
 """
 
 def get_ai_instruction(user_text: str, max_retries: int = 4) -> list | None:
@@ -58,30 +98,14 @@ def get_ai_instruction(user_text: str, max_retries: int = 4) -> list | None:
             
             resp.raise_for_status()
             content = resp.json()["choices"][0]["message"]["content"].strip()
-            # Очистка markdown и пробелов
             content = re.sub(r'```json\s*|```|\`{1,3}', '', content).strip()
             parsed = json.loads(content)
-            if isinstance(parsed, list) and len(parsed) > 0:
+            if isinstance(parsed, list):
                 return parsed
-            else:
-                print("[-] AI вернул пустой или неверный JSON")
-        except json.JSONDecodeError:
-            print("[-] Неверный JSON от AI")
         except Exception as e:
             print(f"[-] Ошибка AI (попытка {attempt+1}): {e}")
             time.sleep(1)
     return None
-
-def trigger_screen_script():
-    """Запуск screen.py в фоне без вывода."""
-    try:
-        subprocess.Popen(["python3", "screen.py"], 
-                        stdout=subprocess.DEVNULL, 
-                        stderr=subprocess.DEVNULL)
-    except FileNotFoundError:
-        print("[-] screen.py не найден")
-    except Exception as e:
-        print(f"[-] Ошибка screen.py: {e}")
 
 def execute_command_list(command_list: list):
     print(f"[*] Выполняю {len(command_list)} команд:")
@@ -109,45 +133,40 @@ def execute_command_list(command_list: list):
                     webbrowser.open(str(params[0]))
             elif action == "mouse_click" and len(params) == 2:
                 pyautogui.click(int(params[0]), int(params[1]))
+            elif action == "screenshot":
+                append_screenshot_to_docx()
         except Exception as e:
             print(f"    ❌ Ошибка шага {i}: {e}")
 
 def main():
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE = 0.1
-    print("🤖 Бот Red OS (исправленная версия)")
-    print("Ctrl+C или 'exit' для выхода")
+    print("🤖 Бот Red OS (Интегрированная версия)")
+    print("Доступно новое действие: 'screenshot'")
     
     while True:
         try:
             user_input = input("\n> Задача: ").strip()
             if user_input.lower() in ["exit", "quit", "выход"]:
-                print("👋 До свидания!")
-                sys.exit(0)
+                break
             if not user_input:
                 continue
 
-            # Разделение по номерам задач (1., 2. и т.д.)
             tasks = re.split(r'(\d+\.\s+)', user_input)
             tasks = [t.strip() for t in tasks if t.strip() and not re.match(r'^\d+\.$', t.strip())]
 
             for idx, task in enumerate(tasks, 1):
                 print(f"\n📋 Подзадача {idx}/{len(tasks)}: {task}")
-                
                 commands = get_ai_instruction(task)
                 if commands:
                     execute_command_list(commands)
-                    time.sleep(0.5)  # Пауза для обновления UI
-                    trigger_screen_script()
                 else:
-                    print(f"[-] Не удалось обработать: {task}")
+                    print(f"[-] Не удалось получить инструкции для: {task}")
 
         except KeyboardInterrupt:
-            print("\n👋 Остановлено")
-            sys.exit(0)
+            break
         except Exception as e:
-            print(f"❌ Ошибка: {e}")
-            time.sleep(2)
+            print(f"❌ Критическая ошибка: {e}")
 
 if __name__ == "__main__":
     main()
