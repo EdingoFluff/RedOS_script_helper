@@ -27,7 +27,4 @@ python3 -m pip install \
     mss \
     python-docx
 
-echo "--- Проверка установки ---"
-python3 -c "import requests, pyautogui, mss, docx; print('Все библиотеки успешно импортированы!')"
-
 echo "--- Готово! Система и окружение настроены. ---"
